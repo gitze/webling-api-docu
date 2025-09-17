@@ -1,0 +1,14 @@
+<phpunit colors="false">
+	<coverage>
+		<report>
+			<html outputDirectory="./coverage/" lowUpperBound="35" highLowerBound="70"/>
+			<text outputFile="php://stdout" showUncoveredFiles="true"/>
+		</report>
+		<include>
+			<directory suffix=".php">../src/</directory>
+		</include>
+		<exclude>
+			<directory suffix=".php">../tests</directory>
+		</exclude>
+	</coverage>
+</phpunit>
