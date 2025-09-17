@@ -213,7 +213,7 @@ $.ajax(apiurl + '/api/1/membergroup/1?apikey=' + apikey)
   });
 ```
 
-[Full documentation continues with all endpoints and details...]
+## Full documentation continues with all endpoints and details...
 ```json
 {
   "name": "Webling API",
