@@ -11,6 +11,39 @@
 
 ## Core Architecture
 
+### HTTP Client Implementation
+```php
+// src/Webling/API/CurlHttp.php
+class CurlHttp {
+    private $ch;
+    
+    public function __construct($endpoint, $apiKey, $options) {
+        $this->ch = curl_init();
+        curl_setopt_array($this->ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . $apiKey
+            ],
+            CURLOPT_CONNECTTIMEOUT => $options['connecttimeout'],
+            CURLOPT_TIMEOUT => $options['timeout'],
+            CURLOPT_USERAGENT => $options['useragent']
+        ]);
+    }
+
+    public function get($path) {
+        curl_setopt($this->ch, CURLOPT_URL, $this->endpoint.$path);
+        return $this->execute();
+    }
+    
+    private function execute() {
+        $response = curl_exec($this->ch);
+        $status = curl_getinfo($this->ch, CURLINFO_HTTP_CODE);
+        return new Response($status, $response);
+    }
+}
+```
+
 ### Class Structure
 ```php
 // src/Webling/API/Client.php
@@ -53,6 +86,21 @@ class FileCache implements ICache {
 
 ## Client Configuration
 
+### Composer Requirements
+```php
+// composer.json
+{
+    "require": {
+        "php": ">=5.6.0",
+        "ext-curl": "*",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^4.8"
+    }
+}
+```
+
 ### Basic Setup
 ```php
 require 'vendor/autoload.php';
@@ -80,6 +128,30 @@ $cache = new Webling\Cache\Cache($client, $adapter);
 
 ## API Operations
 
+### Response Handling
+```php
+// src/Webling/API/Response.php
+class Response implements IResponse {
+    private $statusCode;
+    private $headers;
+    private $data;
+    
+    public function __construct($statusCode, $rawData) {
+        $this->statusCode = $statusCode;
+        $this->parseHeaders($rawData);
+        $this->data = json_decode($rawData, true) ?? $rawData;
+    }
+    
+    public function getStatusCode() {
+        return $this->statusCode;
+    }
+    
+    public function getData() {
+        return $this->data;
+    }
+}
+```
+
 ### Basic CRUD Operations
 ```php
 // Create member
@@ -102,6 +174,25 @@ $groups = $cache->getRoot('membergroup');
 ```
 
 ## Caching System
+
+### Cache Interface Definition
+```php
+// src/Webling/Cache/ICache.php
+interface ICache {
+    public function getObject($type, $id);
+    public function getObjects($type, $ids);
+    public function getRoot($type);
+    public function clearCache();
+    public function updateCache();
+}
+
+// src/Webling/CacheAdapters/ICacheAdapter.php
+interface ICacheAdapter {
+    public function set($key, $value, $ttl);
+    public function get($key);
+    public function clear();
+}
+```
 
 ### File Cache Adapter Implementation
 ```php
@@ -134,6 +225,41 @@ class FileCacheAdapter implements ICacheAdapter {
 ```
 
 ## Advanced Usage
+
+### CLI Usage Example
+```php
+// bin/webling
+#!/usr/bin/env php
+<?php
+require __DIR__.'/../vendor/autoload.php';
+
+$client = new Webling\API\Client($_ENV['WEBLING_ENDPOINT'], $_ENV['WEBLING_KEY']);
+
+$command = $argv[1] ?? 'list';
+switch ($command) {
+    case 'get-member':
+        $response = $client->get('/member/'.$argv[2]);
+        print_r($response->getData());
+        break;
+    case 'clear-cache':
+        $cache->clearCache();
+        echo "Cache cleared\n";
+        break;
+}
+```
+
+### Image Proxy Example
+```php
+// examples/image_proxy.php
+$client = new Webling\API\Client(ENDPOINT, API_KEY);
+$cache = new Webling\Cache\Cache($client, new FileCacheAdapter());
+
+$member = $cache->getObject('member', 123);
+$imageUrl = $member['properties']['ProfileImage']['href'];
+
+header('Content-Type: ' . $member['properties']['ProfileImage']['mimeType']);
+echo $client->getBinary($imageUrl)->getRawData();
+```
 
 ### Batch Request Handling
 ```php
@@ -175,6 +301,62 @@ do {
 ```
 
 ## Testing Implementation
+
+### Performance Test Implementation
+```php
+// tests/performance/ThroughputTest.php
+class ThroughputTest {
+    public function run($requests, $concurrency) {
+        $client = new BulkClient(ENDPOINT, API_KEY);
+        $client->enableCache(false);
+        
+        $times = [];
+        for ($i = 0; $i < $requests; $i++) {
+            $start = microtime(true);
+            $client->get('/member/'.rand(100, 500));
+            $times[] = microtime(true) - $start;
+        }
+        
+        echo "Average response time: ".array_sum($times)/count($times)."s\n";
+        echo "Requests per second: ".$requests/array_sum($times)."\n";
+    }
+}
+```
+
+### Test Configuration
+```php
+// tests/phpunit.xml.dist
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="bootstrap.php">
+    <testsuites>
+        <testsuite name="Webling API Tests">
+            <directory>./Webling/API</directory>
+            <directory>./Webling/Cache</directory>
+        </testsuite>
+    </testsuites>
+    <filter>
+        <whitelist processUncoveredFilesFromWhitelist="true">
+            <directory suffix=".php">../src</directory>
+        </whitelist>
+    </filter>
+</phpunit>
+```
+
+### Mock HTTP Client
+```php
+// tests/Webling/API/Mocks/CurlHttpMock.php
+class CurlHttpMock extends CurlHttp {
+    private $mockResponses = [];
+    
+    public function addMockResponse($path, $status, $data) {
+        $this->mockResponses[$path] = new Response($status, $data);
+    }
+    
+    public function get($path) {
+        return $this->mockResponses[$path] ?? new Response(404);
+    }
+}
+```
 
 ### PHPUnit Test Case
 ```php
