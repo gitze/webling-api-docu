@@ -13,6 +13,34 @@ This plugin integrates Webling membership management features into WordPress usi
 
 ## API Integration
 
+### Batch Processing Example
+```php
+// examples/example_3_webling-plugin/src/helpers/WeblingApiHelper.php
+public function syncAllMembers() {
+    $groups = $this->getGroups();
+    $members = [];
+    
+    foreach ($groups as $groupId) {
+        $response = $this->client->get("/membergroup/$groupId");
+        if ($response->getStatusCode() === 200) {
+            $members = array_merge($members, $response->getData()['children']);
+        }
+    }
+    
+    $batch = [];
+    foreach (array_chunk($members, 50) as $chunk) {
+        $batch[] = $this->client->post('/batch', [
+            'requests' => array_map(fn($id) => [
+                'method' => 'GET',
+                'path' => "/member/$id"
+            ], $chunk)
+        ]);
+    }
+    
+    return array_filter($batch, fn($r) => $r->getStatusCode() === 200);
+}
+```
+
 ### Composer Dependency Setup
 ```php
 // examples/example_3_webling-plugin/composer.json
@@ -76,6 +104,40 @@ public function getGroups() {
 
 ## Plugin Architecture
 
+### Admin Menu Setup
+```php
+// examples/example_3_webling-plugin/src/admin/admin.php
+add_action('admin_menu', function() {
+    add_menu_page(
+        'Webling Settings',
+        'Webling',
+        'manage_options',
+        'webling-settings',
+        'webling_render_settings_page',
+        'dashicons-groups',
+        80
+    );
+    
+    add_submenu_page(
+        'webling-settings',
+        'Member Lists',
+        'Member Lists',
+        'manage_options',
+        'webling-memberlists',
+        'webling_render_memberlists_page'
+    );
+    
+    add_submenu_page(
+        'webling-settings',
+        'Forms',
+        'Forms',
+        'manage_options',
+        'webling-forms',
+        'webling_render_forms_page'
+    );
+});
+```
+
 ### Core Components
 ```
 ├── src/
@@ -96,6 +158,32 @@ graph TD
 ```
 
 ## Member List Implementation
+
+### Advanced Member Query
+```php
+// examples/example_3_webling-plugin/src/helpers/WeblingMemberlistHelper.php
+public function getFilteredMembers($params) {
+    $query = [
+        'limit' => $params['limit'] ?? 25,
+        'offset' => $params['offset'] ?? 0,
+        'sort' => $params['sort'] ?? 'lastname',
+        'fields' => implode(',', $params['fields'] ?? ['id', 'Vorname', 'Name', 'Email'])
+    ];
+
+    if (!empty($params['search'])) {
+        $query['filter'] = json_encode([
+            'operator' => 'OR',
+            'operands' => [
+                ['field' => 'Vorname', 'operator' => '~', 'value' => $params['search']],
+                ['field' => 'Name', 'operator' => '~', 'value' => $params['search']],
+                ['field' => 'Email', 'operator' => '~', 'value' => $params['search']]
+            ]
+        ]);
+    }
+
+    return $this->cache->getRoot("member?" . http_build_query($query));
+}
+```
 
 ### Shortcode Handler
 ```php
@@ -220,6 +308,33 @@ $response = $api->post('/member', [
 ```
 
 ## Caching Mechanism
+
+### Cache Invalidation Example
+```php
+// examples/example_3_webling-plugin/src/WeblingAPI/WordpressCacheAdapter.php
+public function clear($pattern) {
+    $keys = $this->getAllKeys();
+    
+    foreach ($keys as $key) {
+        if (strpos($key, $pattern) === 0) {
+            wp_cache_delete($key, 'webling_api');
+        }
+    }
+}
+
+private function getAllKeys() {
+    global $wp_object_cache;
+    $keys = [];
+    
+    if (isset($wp_object_cache->cache['webling_api'])) {
+        foreach ($wp_object_cache->cache['webling_api'] as $key => $data) {
+            $keys[] = $key;
+        }
+    }
+    
+    return $keys;
+}
+```
 
 ### Cache Key Implementation
 ```php
